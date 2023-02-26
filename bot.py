@@ -198,7 +198,7 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-    MIT License
+#    MIT License
 
 #Copyright (c) 2023 Dmytro Pukhalskyi
 
