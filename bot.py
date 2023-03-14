@@ -1,3 +1,4 @@
+import asyncio
 from collections import deque
 import configparser
 import csv
@@ -5,11 +6,13 @@ from datetime import datetime
 from typing import NamedTuple, Optional, Tuple
 import logging
 
-import pause
-import telebot
+import telegram
+
 
 TIME_TABLE = deque()
 LESSONS_LIST = deque()
+GREETINGS_LIST = deque()
+
 SUBJECTS_DICT = {}
 
 
@@ -69,6 +72,9 @@ def load_config(filename: str) -> Tuple[Optional[dict], Status]:
 
 
 def load_data(subjects_path: str, period_path: str, time_table_path: str) -> Status:
+    SUBJECTS_DICT.clear()
+    LESSONS_LIST.clear()
+    TIME_TABLE.clear()
     try:
         with open(subjects_path, mode='r', encoding="utf-8") as subjects_file:
             subjects_csv_reader = csv.reader(subjects_file)
@@ -82,7 +88,7 @@ def load_data(subjects_path: str, period_path: str, time_table_path: str) -> Sta
         with open(period_path, mode='r', encoding="utf-8") as schedule_file:
             schedule_csv_reader = csv.reader(schedule_file)
             for row, column in enumerate(schedule_csv_reader):
-                if row == datetime.today().weekday():
+                if row == datetime.now().weekday():
                     LESSONS_LIST.extend(column)
 
         with open(time_table_path, mode='r', encoding="utf-8") as time_table_file:
@@ -90,8 +96,8 @@ def load_data(subjects_path: str, period_path: str, time_table_path: str) -> Sta
             for row in time_table_reader:
                 row_list = deque()
                 for column in row:
-                    time = datetime.strptime(column, "%H:%M:%S")
-                    row_list.append(datetime.now().replace(hour=time.hour, minute=time.minute, second=time.second))
+                    time_t = datetime.strptime(column, "%H:%M:%S")
+                    row_list.append(datetime.now().replace(hour=time_t.hour, minute=time_t.minute, second=time_t.second))
                 TIME_TABLE.append(row_list)
         return Status(True, f"Files were successfully loaded")
 
@@ -105,36 +111,30 @@ def load_data(subjects_path: str, period_path: str, time_table_path: str) -> Sta
         return Status(False, f"An unknown error has occurred: {e}")
 
 
-def delete_message(bot: telebot.TeleBot, message_id: int, channel_id: str) -> Status:
+async def delete_message(bot: telegram.Bot, message_id: int, channel_id: str) -> Status:
     try:
-        bot.delete_message(channel_id, message_id)
+        await bot.delete_message(channel_id, message_id)
         return Status(True, f"Message({message_id}) was successfully deleted")
 
-    except telebot.apihelper.ApiException as e:
-        return Status(False, f"Error deleting message: {message_id}. {e}")
+    except telegram.error.TelegramError as e:
+        return Status(False, f"An error occurred during deleting of message: {e}")
 
 
-def send_message(bot: telebot.TeleBot, subject_name: str, channel_id: str) -> \
-        Tuple[Optional[telebot.types.Message], Status]:
+async def send_message(bot: telegram.Bot, subject_name: str, channel_id: str) -> \
+        Tuple[Optional[telegram.Message], Status]:
     photo_path = None
-
     try:
         subject: Optional[SubjectData] = SUBJECTS_DICT.get(subject_name.lower())
-
         if subject is None:
             raise ValueError(f"Subject {subject_name} not found in SUBJECTS_DICT")
-
         str_link = ''
         for i in range(len(subject.link)):
             str_link += f"\n{subject.link[i]}"
-
         message = f"{subject_name}\n{str_link}"
         photo_path = subject.image_path
-
         with open(photo_path, 'rb') as photo:
-            sent_message = bot.send_photo(channel_id, photo=photo, caption=message)
-
-        return sent_message, Status(True, f"Message ({sent_message.message_id}) was successfully sent")
+            message = await bot.send_photo(channel_id, photo=photo, caption=message)
+        return message, Status(True, f"Message ({message.message_id}) was successfully sent")
 
     except FileNotFoundError:
         return None, Status(False, f"Photo file not found: {photo_path}")
@@ -145,14 +145,14 @@ def send_message(bot: telebot.TeleBot, subject_name: str, channel_id: str) -> \
     except ValueError as e:
         return None, Status(False, str(e))
 
-    except telebot.apihelper.ApiException as e:
+    except telegram.error.TelegramError as e:
         return None, Status(False, f"Error sending message: {e}")
 
     except Exception as e:
         return None, Status(False, f"An unknown error has occurred: {e}")
 
 
-def main() -> None:
+async def main() -> None:
     config, status = load_config("config.ini")
     logging.basicConfig(filename="bot.log", encoding="utf-8", level=logging.DEBUG)
 
@@ -161,7 +161,7 @@ def main() -> None:
 
     token = config["bot_token"]
     channel_id = config["channel_id"]
-    bot = telebot.TeleBot(token)
+    bot = telegram.Bot(token)
 
     current_period = get_current_period(int(config["number_of_periods"]),
                                         int(config["period_duration"]),
@@ -173,49 +173,38 @@ def main() -> None:
     if not status.log():
         raise Exception(status.text)
 
-    for i in range(len(LESSONS_LIST)):
+    while True:
         next_lesson_index = get_next_lesson_index()
 
         if next_lesson_index < 0:
-            return
+            now = datetime.now()
+            wait_time = datetime(now.year, now.month, now.day, 8, 00) - now
 
-        subject = LESSONS_LIST[next_lesson_index]
-        start_time, end_time = TIME_TABLE[next_lesson_index]
+            await asyncio.sleep(wait_time.seconds)
 
-        pause.until(start_time)
-        msg, status = send_message(bot, subject, channel_id)
+            current_period = get_current_period(int(config["number_of_periods"]),
+                                                int(config["period_duration"]),
+                                                datetime.strptime(config["start_of_first_period"], "%Y/%M/%d"))
+            load_data(config["subjects_dict_file_path"],
+                      config["standard_period_file_path"].replace("$", str(current_period)),
+                      config["time_table_file_path"])
 
-        if not status.log():
-            raise Exception(status.text)
+        else:
+            subject = LESSONS_LIST[next_lesson_index]
+            start_time, end_time = TIME_TABLE[next_lesson_index]
 
-        pause.until(end_time)
-        status = delete_message(bot, msg.message_id, channel_id)
+            await asyncio.sleep((start_time - datetime.now()).seconds)
+            msg, status = await send_message(bot, subject, channel_id)
 
-        if not status.log():
-            raise Exception(status.text)
+            if not status.log():
+                raise Exception(status.text)
+
+            await asyncio.sleep((end_time - datetime.now()).seconds)
+            status = await delete_message(bot, msg.message_id, channel_id)
+
+            if not status.log():
+                raise Exception(status.text)
 
 
 if __name__ == "__main__":
-    main()
-
-#    MIT License
-
-#Copyright (c) 2023 Dmytro Pukhalskyi
-
-#Permission is hereby granted, free of charge, to any person obtaining a copy
-#of this software and associated documentation files (the "Software"), to deal
-#in the Software without restriction, including without limitation the rights
-#to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-#copies of the Software, and to permit persons to whom the Software is
-#furnished to do so, subject to the following conditions:
-
-#The above copyright notice and this permission notice shall be included in all
-#copies or substantial portions of the Software.
-
-#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-#AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-#OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-#SOFTWARE.
+    asyncio.run(main())
