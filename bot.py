@@ -5,6 +5,7 @@ import csv
 from datetime import datetime
 from typing import NamedTuple, Optional, Tuple
 import logging
+import math
 
 import telegram
 
@@ -36,9 +37,9 @@ class Status:
 
 def get_current_period(number_of_periods: int, period_duration: int, start_of_first_period: datetime) -> int:
     today = datetime.today()
-
     days_since_start_date = (today - start_of_first_period).days
-    current_period_number = (days_since_start_date / period_duration) + 1
+    current_period_number = math.floor(days_since_start_date / period_duration) + 1
+    
     for n in range(number_of_periods, 0, -1):
         if current_period_number % n == 0 or n == 1:
             return n
