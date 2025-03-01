@@ -114,7 +114,7 @@ def load_data(subjects_path: str, period_path: str, time_table_path: str) -> Sta
 
 async def delete_message(bot: telegram.Bot, message_id: int, channel_id: str) -> Status:
     try:
-        await bot.delete_message(channel_id, message_id)
+        await bot.delete_message(channel_id, message_id, read_timeout=60, write_timeout=60, connect_timeout=60)
         return Status(True, f"Message({message_id}) was successfully deleted")
 
     except telegram.error.TelegramError as e:
@@ -134,7 +134,7 @@ async def send_message(bot: telegram.Bot, subject_name: str, channel_id: str) ->
         message = f"{subject_name}\n{str_link}"
         photo_path = subject.image_path
         with open(photo_path, 'rb') as photo:
-            message = await bot.send_photo(channel_id, photo=photo, caption=message)
+            message = await bot.send_photo(channel_id, photo=photo, caption=message, read_timeout=60, write_timeout=60, connect_timeout=60)
         return message, Status(True, f"Message ({message.message_id}) was successfully sent")
 
     except FileNotFoundError:
@@ -166,7 +166,7 @@ async def main() -> None:
 
     current_period = get_current_period(int(config["number_of_periods"]),
                                         int(config["period_duration"]),
-                                        datetime.strptime(config["start_of_first_period"], "%Y/%M/%d"))
+                                        datetime.strptime(config["start_of_first_period"], "%Y/%m/%d"))
     status = load_data(config["subjects_dict_file_path"],
                        config["standard_period_file_path"].replace("$", str(current_period)),
                        config["time_table_file_path"])
@@ -185,7 +185,7 @@ async def main() -> None:
 
             current_period = get_current_period(int(config["number_of_periods"]),
                                                 int(config["period_duration"]),
-                                                datetime.strptime(config["start_of_first_period"], "%Y/%M/%d"))
+                                                datetime.strptime(config["start_of_first_period"], "%Y/%m/%d"))
             load_data(config["subjects_dict_file_path"],
                       config["standard_period_file_path"].replace("$", str(current_period)),
                       config["time_table_file_path"])
