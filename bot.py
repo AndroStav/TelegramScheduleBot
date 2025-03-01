@@ -59,10 +59,10 @@ def get_next_lesson_index() -> int:
 
 def load_config(filename: str) -> Tuple[Optional[dict], Status]:
     config = configparser.ConfigParser()
-    try:
-        config.read(filename)
-    except configparser.Error as e:
-        return None, Status(False, f"Error reading configuration file: {e}")
+    config.read(filename)
+    
+    if not config.sections():
+        return None, Status(False, f"Error reading configuration file: {filename}")
 
     result = {}
     for section in config.sections():
@@ -163,6 +163,8 @@ async def main() -> None:
     token = config["bot_token"]
     channel_id = config["channel_id"]
     bot = telegram.Bot(token)
+    
+    print("Bot is running")
 
     current_period = get_current_period(int(config["number_of_periods"]),
                                         int(config["period_duration"]),
